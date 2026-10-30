@@ -108,12 +108,37 @@ python -m pytest
 The tests cover CSV loading (separator and encoding detection) and the tools. They don't call the LLM,
 so they run offline and don't need a Groq API key.
 
+## Evaluating the agent
+The tests above check the code; the evaluation checks the **LLM**: does it get the answers right,
+and does it invent numbers? It runs the real agent on questions whose correct answers are computed
+with pandas:
+
+```bash
+python -m app.evals                                  # all cases with the default model
+python -m app.evals --model openai/gpt-oss-20b       # compare another model
+python -m app.evals --repeat 3                       # run each case 3 times to measure flakiness
+python -m app.evals --case chart                     # only cases whose name contains "chart"
+python -m app.evals --list                           # list the cases
+```
+
+Each case checks that the right numbers appear in the answer (in any format), that the right category
+is named, that charts are called with the right columns and filters, and that every number in the
+answer comes from a tool result. There are plain questions, follow-ups that need the conversation
+memory, chart requests and traps: a question about a column that doesn't exist, and a correlation
+hidden by outliers.
+
+It prints a line per run and a summary (pass rate, answers without invented numbers, time and tokens
+per run), and saves every answer and tool call to `outputs/evals/` for inspection. Run it before
+switching models: it calls the real API and uses tokens, and if the provider's rate limit is reached
+it stops and lists the cases that didn't run instead of counting them as failures.
+
 ## Project structure
 ```
 app/
 ├── agents/     # Agno agent definition
 ├── cli/        # Interactive CLI (entry point)
 ├── core/       # LLM configuration
+├── evals/      # Agent evaluation: cases with computed answers, checks, runner
 ├── report/     # HTML report: chart selection, LLM text with number checks, rendering
 ├── services/   # DataFrame state
 └── tools/      # Tools available to the agent

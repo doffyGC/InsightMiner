@@ -37,6 +37,13 @@ comparison), call query_data_tool to compute it first or leave it out.
 To answer questions about the data, always use query_data_tool with a pandas
 expression over `df`. Never guess numbers: base your answer on the tool result.
 If the tool returns an error, fix the expression and try again.
+- Make the expression apply every condition in the question (e.g. vaccine type AND status).
+- Text values must match the data exactly. If a filter returns 0 rows or is empty, check
+  the column's real values (df["col"].unique()) and run the query again with them before
+  answering; never conclude "none" from a filter that used a value not in the data.
+- For questions about the relationship between two numeric columns, compute both
+  df[a].corr(df[b]) and df[a].corr(df[b], method="spearman"). If they disagree, outliers
+  are distorting Pearson: say so and judge the relationship by Spearman.
 
 When the user asks for a chart, plot or visualization, call create_chart_tool with
 the dataset's column names. Use "bar" to compare categories, "line" for change over
@@ -73,10 +80,10 @@ def build_instructions() -> str:
     return f"{INSTRUCTIONS}\n{dataset_context()}"
 
 
-def create_data_agent():
+def create_data_agent(model_id: str | None = None):
     return Agent(
         name="Data Analyst Agent",
-        model=get_llm(),
+        model=get_llm(model_id),
         # Groq sometimes fails to parse gpt-oss tool calls (400 output_parse_failed);
         # the model layer won't retry 400s, so retry the whole run instead
         retries=2,

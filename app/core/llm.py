@@ -3,7 +3,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-def get_llm():
-    return Groq(
-        id="openai/gpt-oss-120b",  # Groq Model    
-        )
+DEFAULT_MODEL = "openai/gpt-oss-120b"  # Groq model
+
+
+def get_llm(model_id: str | None = None):
+    return Groq(id=model_id or DEFAULT_MODEL)

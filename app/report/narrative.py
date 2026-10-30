@@ -7,10 +7,11 @@ from pydantic import BaseModel, Field
 from app.core.llm import get_llm
 from app.report.labels import LANGUAGES
 
-# numbers as written in English (1,234.5) or Portuguese (1.234,5 / 1 234,5), optionally 12.5K / 3 mil
+# numbers as written in English (1,234.5) or Portuguese (1.234,5 / 1 234,5), optionally 12.5K / 3 mil;
+# not after a letter or hyphen, so the 19 in "Covid-19" is part of a name, not a number
 NUMBER = re.compile(
-    r"(?<![\w.,])-?\d{1,3}(?:[ ,.  ]\d{3})+(?:[.,]\d+)?(?:\s?(?:[kKmM]\b|mil\b|mi\b))?"
-    r"|(?<![\w.,])-?\d+(?:[.,]\d+)?(?:\s?(?:[kKmM]\b|mil\b|mi\b))?"
+    r"(?<![\w.,\-‐‑])-?\d{1,3}(?:[ ,.  ]\d{3})+(?:[.,]\d+)?(?:\s?(?:[kKmM]\b|mil\b|mi\b))?"
+    r"|(?<![\w.,\-‐‑])-?\d+(?:[.,]\d+)?(?:\s?(?:[kKmM]\b|mil\b|mi\b))?"
 )
 DATE = re.compile(r"\d{4}[-‑]\d{2}(?:[-‑]\d{2})?|\d{1,2}/\d{1,2}/\d{2,4}")
 CHART_REF = re.compile(r"\b(?:Chart|Gráfico|Figure|Figura)\s+\d+", re.IGNORECASE)
@@ -79,8 +80,10 @@ def unverified_numbers(texts: list[str], facts: str) -> list[str]:
     """
     known = [value for token in numbers_in(facts) for value in interpretations(token)]
 
-    def matches(value: float) -> bool:
-        return any(abs(value - k) <= max(0.051, TOLERANCE * abs(k)) for k in known)
+    def matches(value: float, rounded: bool) -> bool:
+        # a whole number is often a rounded fact ("53%" for 53.5), so it may be off by less than 1
+        slack = 0.999 if rounded else 0.051
+        return any(abs(value - k) <= max(slack, TOLERANCE * abs(k)) for k in known)
 
     flagged = []
     for text in texts:
@@ -88,7 +91,8 @@ def unverified_numbers(texts: list[str], facts: str) -> list[str]:
             values = interpretations(token)
             if all(v.is_integer() and (abs(v) <= SMALL_INT or 1900 <= v <= 2100) for v in values):
                 continue
-            if not any(matches(v) for v in values) and token.strip() not in flagged:
+            rounded = all(v.is_integer() for v in values)
+            if not any(matches(v, rounded) for v in values) and token.strip() not in flagged:
                 flagged.append(token.strip())
     return flagged
 

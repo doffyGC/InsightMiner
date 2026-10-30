@@ -70,3 +70,27 @@ def test_query_reports_errors(use_df):
 
 def test_query_without_dataset():
     assert "No dataset loaded" in query_data_tool("len(df)")
+
+
+@pytest.mark.parametrize("code, warning", [
+    ("df[df['Status'] == 'Recusado'].shape[0]", "'Recusado' is not a value in the data; did you mean 'RECUSADA' (column 'Status')?"),
+    ("df[df['Tipo de Vacina'] != \"covid\"].shape[0]", "'covid' is not a value in the data; did you mean 'Covid-19' (column 'Tipo de Vacina')?"),
+    ("df[df['Status'].isin(['ENVIADA', 'Confirmado'])].shape[0]", "'Confirmado' is not a value in the data; did you mean 'CONFIRMADA'"),
+    ("df[df['Status'] == 'xyz'].shape[0]", "'xyz' is not a value in the data. Fix the value"),
+])
+def test_query_warns_about_values_not_in_the_data(code, warning):
+    load_dataset_tool("data/relatorio-notificacoes.csv")
+
+    assert warning in query_data_tool(code)
+
+
+@pytest.mark.parametrize("code", [
+    "df[(df['Status'] == 'CONFIRMADA') | (df['Status'] == 'ENVIADA')].shape[0]",
+    "df[df['Status'].isin(['CONFIRMADA', 'ENVIADA'])].shape[0]",
+    "pd.to_datetime(df['Data da Dose'], format='%d/%m/%Y').dt.month.value_counts()",
+    "df.groupby('Status').size()",
+])
+def test_query_does_not_warn_about_real_values_formats_or_columns(code):
+    load_dataset_tool("data/relatorio-notificacoes.csv")
+
+    assert "Warning" not in query_data_tool(code)

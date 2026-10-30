@@ -297,3 +297,14 @@ def test_column_values(series, kind, language, expected):
 def test_localize():
     assert localize("1,234.5", "pt") == "1.234,5"
     assert localize("1,234.5", "en") == "1,234.5"
+
+
+@pytest.mark.parametrize("text", ["3 doses de Covid-19", "Covid‑19 (non-breaking hyphen)", "H1N1 and COVID-2019"])
+def test_numbers_inside_names_are_not_numbers(text):
+    assert unverified_numbers([text], FACTS) == []
+
+
+def test_whole_numbers_may_be_rounded_facts():
+    assert unverified_numbers(["Sul is about 54% of revenue"], FACTS) == []  # 53.6 in the facts
+    assert unverified_numbers(["Sul is about 55% of revenue"], FACTS) == ["55"]
+    assert unverified_numbers(["Sul is 53.1% of revenue"], FACTS) == ["53.1"]  # decimals must match
