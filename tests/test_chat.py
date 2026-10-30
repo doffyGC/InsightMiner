@@ -113,3 +113,40 @@ def test_help(session, capsys):
     session.handle("/help")
 
     assert "/load <path>" in capsys.readouterr().out
+
+
+def test_report_command(session, monkeypatch, capsys):
+    calls, opened = [], []
+    monkeypatch.setattr(cli, "generate_report_tool", lambda lang: calls.append(lang) or "Report saved to r.html\nok")
+    monkeypatch.setattr(cli, "open_file", opened.append)
+
+    session.handle("/report pt")
+
+    assert calls == ["pt"] and opened == ["r.html"]
+    assert session.agent.messages == []
+
+
+def test_report_command_defaults_to_english(session, monkeypatch):
+    calls = []
+    monkeypatch.setattr(cli, "generate_report_tool", lambda lang: calls.append(lang) or "Error generating report: x")
+    monkeypatch.setattr(cli, "open_file", lambda p: pytest.fail("nothing to open"))
+
+    session.handle("/report")
+
+    assert calls == ["en"]
+
+
+def test_report_command_rejects_other_languages(session, capsys):
+    session.handle("/report es")
+
+    assert "Usage: /report [pt]" in capsys.readouterr().out
+
+
+def test_agent_opens_reports_it_generates(monkeypatch):
+    opened = []
+    monkeypatch.setattr(cli, "open_file", opened.append)
+    response = SimpleNamespace(tools=[SimpleNamespace(tool_name="generate_report_tool", result="Report saved to r.html\n...")])
+
+    cli.open_charts(response)
+
+    assert opened == ["r.html"]

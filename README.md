@@ -13,6 +13,7 @@ The agent has a set of tools over a pandas DataFrame:
 | `generate_insights_tool` | Profiles every column (numeric, date, categorical, identifier) and finds outliers, dominant categories, date peaks and relationships between columns |
 | `query_data_tool` | Runs a pandas expression written by the agent over the **full** dataset |
 | `create_chart_tool` | Saves a bar, line, histogram or scatter chart (optionally filtered) as PNG in `outputs/` and returns the plotted numbers |
+| `generate_report_tool` | Builds a shareable HTML report of the whole dataset (see [Reports](#reports)) |
 
 To answer a question, the agent writes a pandas expression such as
 `df[df["Status"] == "CONFIRMADA"].groupby("Tipo de Vacina").size()`, runs it with `query_data_tool`
@@ -61,6 +62,7 @@ data, the filter is shown under its title.
 | Command | What it does |
 |---|---|
 | `/load <path>` | Loads a CSV (you can also just ask the agent to load a file) |
+| `/report [pt]` | Generates an HTML report, in English or in Portuguese with `pt` (you can also ask the agent for one) |
 | `/new` | Starts a new conversation, keeping the loaded dataset |
 | `/help` | Shows examples and commands |
 | `/exit` | Quits |
@@ -78,6 +80,25 @@ More examples:
 
 > The CSV separator (`;`, `,`, tab or `|`) and encoding (UTF-8 or Latin-1) are detected automatically.
 
+## Reports
+`/report` (or asking the agent for a report) builds a single self-contained HTML file in `outputs/`,
+with the charts embedded, ready to send to someone:
+
+- **Key numbers**: rows, columns, missing cells and duplicated rows.
+- **Summary** written by the LLM, plus a short caption under each chart.
+- **Up to 6 charts**, chosen by rules from what the data shows: activity over time, the strongest
+  correlation, the measure that differs the most between groups, categories that combine unevenly,
+  category distributions and the distribution of a skewed numeric column. Each one has its data table.
+- **Columns table** with type, missing values, distinct values and value ranges.
+- **All computed facts** the text is based on.
+
+Facts and charts are computed in code, so the same data always gives the same report. The LLM only
+writes the text, and every number it writes is checked against the facts. If it uses a number that
+isn't there (a new total or percentage, for example), it is asked to rewrite once; anything still
+unmatched is listed in a warning on the report.
+
+Reports are in English by default; `/report pt` writes them in Portuguese.
+
 ## Tests
 ```bash
 pip install -r requirements-dev.txt
@@ -93,10 +114,11 @@ app/
 ├── agents/     # Agno agent definition
 ├── cli/        # Interactive CLI (entry point)
 ├── core/       # LLM configuration
+├── report/     # HTML report: chart selection, LLM text with number checks, rendering
 ├── services/   # DataFrame state
 └── tools/      # Tools available to the agent
 data/           # Sample datasets
-outputs/        # Generated charts (not versioned)
+outputs/        # Generated charts and reports (not versioned)
 tests/          # pytest suite
 ```
 

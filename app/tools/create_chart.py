@@ -1,4 +1,5 @@
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -10,7 +11,7 @@ from matplotlib.ticker import FuncFormatter, MaxNLocator
 import pandas as pd
 
 from app.services.dataframe_services import dataframe_service
-from app.tools.generate_insights import parse_dates
+from app.tools.generate_insights import find_outliers, parse_dates
 from app.tools.query_data import evaluate
 
 OUTPUT_DIR = Path("outputs")
@@ -19,6 +20,7 @@ AGGREGATIONS = ["count", "sum", "mean", "median"]
 TIME_UNITS = ["auto", "day", "week", "month", "year"]
 MAX_BARS = 15
 MAX_TABLE_ROWS = 20
+MAX_HIDDEN_OUTLIERS = 0.1  # histograms leave out outliers only while they are a small tail
 
 # Validated categorical palette (light mode), always assigned in this order.
 # Only the first 3 stay distinguishable when every pair can touch (scatter), so scatter caps groups at 3.
@@ -386,6 +388,123 @@ def output_path(kind: str, *columns: str | None) -> Path:
     return path
 
 
+@dataclass
+class Chart:
+    path: Path
+    data: pd.DataFrame | None   # what was plotted (None for scatter, which plots raw points)
+    note: str                   # plotted numbers as text, for the LLM to describe the chart
+
+
+def plotted_table(kind: str, agg: str, data: pd.DataFrame) -> pd.DataFrame:
+    """The plotted data, plus each bar's share of the total so nobody has to compute it."""
+    if kind == "bar" and agg in ("count", "sum") and data.shape[1] == 1:
+        column = data.columns[0]
+        total = data[column].sum()
+        if total:
+            return data.assign(**{"Share %": (data[column] / total * 100).round(1)})
+    return data
+
+
+def render_chart(
+    df: pd.DataFrame,
+    kind: str,
+    x: str,
+    y: str | None = None,
+    agg: str = "count",
+    group: str | None = None,
+    title: str | None = None,
+    time_unit: str = "auto",
+    filter: str | None = None,
+    subtitle: str | None = None,
+    path: Path | None = None,
+    count_label: str = "Rows",
+    hidden_outliers_label: str = "{n} outliers outside {low} to {high} not shown",
+) -> Chart:
+    """
+    Draw a chart of `df` and save it as PNG. Raises ChartError on invalid requests.
+    `subtitle`, `path`, `count_label` and `hidden_outliers_label` let callers (like the report)
+    override the generated English texts and the output file.
+    """
+    if filter:
+        df = apply_filter(df, filter)
+    if kind not in KINDS:
+        raise ChartError(f"Unknown kind '{kind}'. Use one of {KINDS}.")
+    if agg not in AGGREGATIONS:
+        raise ChartError(f"Unknown agg '{agg}'. Use one of {AGGREGATIONS}.")
+    if time_unit not in TIME_UNITS:
+        raise ChartError(f"Unknown time_unit '{time_unit}'. Use one of {TIME_UNITS}.")
+    require_column(df, x, "x")
+    if group:
+        require_column(df, group, "group")
+    if kind in ("bar", "line") and agg != "count":
+        require_numeric(df, require_column(df, y, "y"))
+    if kind == "histogram":
+        require_numeric(df, x)
+    if kind == "scatter":
+        require_numeric(df, x)
+        require_numeric(df, require_column(df, y, "y"))
+
+    try:
+        with plt.rc_context(STYLE):
+            fig, ax = plt.subplots(figsize=FIGSIZE)
+            measure = describe_measure(y, agg)
+            note = ""
+            hidden = ""  # data left out of the drawing, always disclosed on the chart and in the note
+            if kind == "bar":
+                data = prepare_bar(df, x, y, agg, group).rename(columns={"Rows": count_label})
+                draw_bar(fig, ax, data, integer=agg == "count")
+                generated = f"{measure} by {x}" + (f", split by {group}" if group else "")
+            elif kind == "line":
+                data, unit = prepare_line(df, x, y, agg, group, time_unit)
+                data = data.rename(columns={"Rows": count_label})
+                draw_line(ax, data, integer=agg == "count")
+                generated = f"{measure} per {unit or x}" + (f", split by {group}" if group else "")
+            elif kind == "histogram":
+                values = df[x].dropna()
+                outliers = find_outliers(values)
+                # a few extreme values would squeeze every other value into one bar
+                if 0 < len(outliers) <= MAX_HIDDEN_OUTLIERS * len(values):
+                    values = values.drop(outliers.index)
+                    hidden = hidden_outliers_label.format(
+                        n=len(outliers), low=format_number(values.min()), high=format_number(values.max())
+                    )
+                data = draw_histogram(ax, values).rename(columns={"Rows": count_label})
+                ax.set_xlabel(x)
+                ax.set_ylabel(count_label)
+                generated = f"Distribution of {x} ({len(values)} values)"
+            else:
+                frame = df[[x, y] + ([group] if group else [])].dropna(subset=[x, y])
+                draw_scatter(ax, frame, x, y, group)
+                ax.set_xlabel(x)
+                ax.set_ylabel(y)
+                generated = f"{y} vs {x} ({len(frame)} points)" + (f", colored by {group}" if group else "")
+                data = None
+                note = f"Points plotted: {len(frame)}. " + describe_correlation(frame, x, y)
+
+            subtitle = subtitle or generated
+            details = [subtitle] if title else []
+            if filter:
+                details.append(f"Filtered: {readable_filter(filter)} ({len(df)} rows)")
+            if hidden:
+                details.append(hidden.capitalize())
+            layout_header(fig, title or subtitle, " · ".join(details) or None)
+
+            path = path or output_path(kind, x, y, group)
+            fig.savefig(path, dpi=DPI, facecolor=SURFACE)
+    finally:
+        plt.close("all")
+
+    if data is not None:
+        table = plotted_table(kind, agg, data)
+        text = table.round(2).head(MAX_TABLE_ROWS).to_string()
+        if len(table) > MAX_TABLE_ROWS:
+            text += f"\n... ({len(table)} rows in total)"
+        note = f"Plotted data:\n{text}"
+    if hidden:
+        note += f"\nNot shown: {hidden}."
+    return Chart(path=path, data=data, note=note)
+
+
 def create_chart_tool(
     kind: str,
     x: str,
@@ -418,71 +537,10 @@ def create_chart_tool(
             Use it whenever the chart is about a subset discussed in the conversation.
     """
     try:
-        df = dataframe_service.get_df()
-        if filter:
-            df = apply_filter(df, filter)
-        if kind not in KINDS:
-            raise ChartError(f"Unknown kind '{kind}'. Use one of {KINDS}.")
-        if agg not in AGGREGATIONS:
-            raise ChartError(f"Unknown agg '{agg}'. Use one of {AGGREGATIONS}.")
-        if time_unit not in TIME_UNITS:
-            raise ChartError(f"Unknown time_unit '{time_unit}'. Use one of {TIME_UNITS}.")
-        require_column(df, x, "x")
-        if group:
-            require_column(df, group, "group")
-        if kind in ("bar", "line") and agg != "count":
-            require_numeric(df, require_column(df, y, "y"))
-        if kind == "histogram":
-            require_numeric(df, x)
-        if kind == "scatter":
-            require_numeric(df, x)
-            require_numeric(df, require_column(df, y, "y"))
-
-        with plt.rc_context(STYLE):
-            fig, ax = plt.subplots(figsize=FIGSIZE)
-            measure = describe_measure(y, agg)
-            note = ""
-            if kind == "bar":
-                data = prepare_bar(df, x, y, agg, group)
-                draw_bar(fig, ax, data, integer=agg == "count")
-                subtitle = f"{measure} by {x}" + (f", split by {group}" if group else "")
-            elif kind == "line":
-                data, unit = prepare_line(df, x, y, agg, group, time_unit)
-                draw_line(ax, data, integer=agg == "count")
-                subtitle = f"{measure} per {unit or x}" + (f", split by {group}" if group else "")
-            elif kind == "histogram":
-                values = df[x].dropna()
-                data = draw_histogram(ax, values)
-                ax.set_xlabel(x)
-                ax.set_ylabel("Rows")
-                subtitle = f"Distribution of {x} ({len(values)} values)"
-            else:
-                frame = df[[x, y] + ([group] if group else [])].dropna(subset=[x, y])
-                draw_scatter(ax, frame, x, y, group)
-                ax.set_xlabel(x)
-                ax.set_ylabel(y)
-                subtitle = f"{y} vs {x} ({len(frame)} points)" + (f", colored by {group}" if group else "")
-                data = None
-                note = f"Points plotted: {len(frame)}. " + describe_correlation(frame, x, y)
-
-            details = [subtitle] if title else []
-            if filter:
-                details.append(f"Filtered: {readable_filter(filter)} ({len(df)} rows)")
-            layout_header(fig, title or subtitle, " · ".join(details) or None)
-
-            path = output_path(kind, x, y, group)
-            fig.savefig(path, dpi=DPI, facecolor=SURFACE)
-            plt.close(fig)
-
-        if data is not None:
-            table = data.round(2).head(MAX_TABLE_ROWS).to_string()
-            if len(data) > MAX_TABLE_ROWS:
-                table += f"\n... ({len(data)} rows in total)"
-            note = f"Plotted data:\n{table}"
-        return f"Chart saved to {path}\n{note}"
+        chart = render_chart(dataframe_service.get_df(), kind, x, y, agg, group, title, time_unit, filter)
+        return f"Chart saved to {chart.path}\n{chart.note}"
 
     except ChartError as e:
         return f"Error creating chart: {e}"
     except Exception as e:
-        plt.close("all")
         return f"Error creating chart: {type(e).__name__}: {e}"

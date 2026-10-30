@@ -196,3 +196,26 @@ def test_invalid_filters(expression, message):
 ])
 def test_readable_filter(expression, readable):
     assert create_chart.readable_filter(expression) == readable
+
+
+def test_histogram_leaves_out_a_small_tail_of_outliers_and_says_so(use_df):
+    use_df(pd.DataFrame({"v": [10.0, 11, 12, 13, 14, 15, 16, 17, 18, 19] * 3 + [5000.0]}))
+
+    result = create_chart_tool(kind="histogram", x="v")
+
+    assert "Not shown: 1 outliers outside 10 to 19 not shown." in result
+
+
+def test_histogram_keeps_outliers_when_they_are_not_a_small_tail(use_df):
+    use_df(pd.DataFrame({"v": [1.0] * 8 + [100.0, 200.0]}))
+
+    assert "Not shown" not in create_chart_tool(kind="histogram", x="v")
+
+
+def test_bar_table_includes_share_of_total():
+    load_dataset_tool("data/vendas.csv")
+
+    result = create_chart_tool(kind="bar", x="canal")
+
+    assert "Share %" in result
+    assert "Loja        158     51.8" in result

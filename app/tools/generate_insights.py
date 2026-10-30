@@ -1,4 +1,6 @@
 import warnings
+from dataclasses import dataclass, field
+
 import pandas as pd
 from app.services.dataframe_services import dataframe_service
 
@@ -10,6 +12,61 @@ SMALL_SAMPLE = 30      # below this, relationships are only indicative
 MAX_GROUPS = 8         # groups listed when comparing a numeric column across categories
 ID_UNIQUENESS = 0.95  # share of distinct values that makes a column look like an identifier
 DATE_FORMATS = ["%d/%m/%Y", "%Y-%m-%d", "%d/%m/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S"]
+
+
+@dataclass
+class Correlation:
+    a: str
+    b: str
+    pearson: float
+    spearman: float
+
+    @property
+    def strength(self) -> float:
+        return max(abs(self.pearson), abs(self.spearman))
+
+
+@dataclass
+class Concentration:
+    """Among rows where `column` == `value`, `other` == `other_value` is `lift` times more common than overall."""
+    column: str
+    value: str
+    other: str
+    other_value: str
+    lift: float
+
+
+@dataclass
+class GroupMeans:
+    """The average of `numeric` changes `ratio` times across the groups of `category`."""
+    numeric: str
+    category: str
+    ratio: float
+
+
+@dataclass
+class Profile:
+    """Facts about a dataset: text lines for the LLM plus structured findings for code."""
+    rows: int
+    overview: list[str] = field(default_factory=list)
+    columns: list[str] = field(default_factory=list)
+    relationships: list[str] = field(default_factory=list)
+    # column name -> "numeric", "date", "categorical", "id", "text" or "empty"
+    kinds: dict[str, str] = field(default_factory=dict)
+    correlations: list[Correlation] = field(default_factory=list)
+    concentrations: list[Concentration] = field(default_factory=list)
+    group_means: list[GroupMeans] = field(default_factory=list)
+    irregular: list[str] = field(default_factory=list)  # numeric columns that are skewed or have outliers
+
+    def columns_of(self, kind: str) -> list[str]:
+        return [name for name, k in self.kinds.items() if k == kind]
+
+    def text(self) -> str:
+        sections = [("Overview", self.overview), ("Columns", self.columns), ("Relationships", self.relationships)]
+        return "\n\n".join(
+            f"## {title}\n" + "\n".join(f"- {line}" for line in lines)
+            for title, lines in sections if lines
+        )
 
 
 def pct(part, total) -> str:
@@ -31,6 +88,15 @@ def parse_dates(series: pd.Series):
     return parsed if parsed.notna().mean() >= 0.9 else None
 
 
+def find_outliers(s: pd.Series) -> pd.Series:
+    q1, q3 = s.quantile(0.25), s.quantile(0.75)
+    iqr = q3 - q1
+    if iqr > 0:
+        return s[(s < q1 - 1.5 * iqr) | (s > q3 + 1.5 * iqr)]
+    # most values are equal, so the IQR is 0: fall back to distance from the mean
+    return s[(s - s.mean()).abs() > 3 * s.std()] if s.std() > 0 else s.iloc[:0]
+
+
 def numeric_insights(name: str, series: pd.Series) -> list[str]:
     s = series.dropna()
     if s.empty:
@@ -45,19 +111,18 @@ def numeric_insights(name: str, series: pd.Series) -> list[str]:
         side = "right (a few high values pull the mean up)" if skew > 0 else "left (a few low values pull the mean down)"
         lines.append(f"'{name}' is skewed to the {side}; prefer the median.")
 
-    q1, q3 = s.quantile(0.25), s.quantile(0.75)
-    iqr = q3 - q1
-    if iqr > 0:
-        outliers = s[(s < q1 - 1.5 * iqr) | (s > q3 + 1.5 * iqr)]
-    else:
-        # most values are equal, so the IQR is 0: fall back to distance from the mean
-        outliers = s[(s - s.mean()).abs() > 3 * s.std()] if s.std() > 0 else s.iloc[:0]
+    outliers = find_outliers(s)
     if len(outliers) > 0:
         lines.append(f"'{name}' has {len(outliers)} outliers ({pct(len(outliers), len(s))}), e.g. {outliers.head(3).tolist()}.")
 
     if s.nunique() == 1:
         lines.append(f"'{name}' is constant ({s.iloc[0]}) and carries no information.")
     return lines
+
+
+def is_irregular(series: pd.Series) -> bool:
+    s = series.dropna()
+    return len(s) > 2 and (abs(s.skew()) > 1 or len(find_outliers(s)) > 0)
 
 
 def date_insights(name: str, dates: pd.Series) -> list[str]:
@@ -110,8 +175,9 @@ def text_insights(name: str, series: pd.Series) -> list[str]:
     return [f"'{name}' (text): {s.nunique()} distinct values, {duplicates} repeated."]
 
 
-def cross_insights(df: pd.DataFrame, numeric_cols: list[str], categorical_cols: list[str]) -> list[str]:
-    lines = []
+def cross_insights(df: pd.DataFrame, profile: Profile) -> None:
+    numeric_cols, categorical_cols = profile.columns_of("numeric"), profile.columns_of("categorical")
+    lines = profile.relationships
 
     # strong correlations between numeric columns; Spearman (rank-based) catches
     # relationships that a few outliers hide from Pearson
@@ -120,14 +186,16 @@ def cross_insights(df: pd.DataFrame, numeric_cols: list[str], categorical_cols: 
         spearman = df[numeric_cols].corr(method="spearman")
         for i, a in enumerate(numeric_cols):
             for b in numeric_cols[i + 1:]:
-                p, s = pearson.loc[a, b], spearman.loc[a, b]
-                strongest = p if abs(p) >= abs(s) else s
-                if abs(strongest) >= STRONG_CORR:
+                corr = Correlation(a, b, pearson.loc[a, b], spearman.loc[a, b])
+                if corr.strength >= STRONG_CORR:
+                    p, s = corr.pearson, corr.spearman
+                    strongest = p if abs(p) >= abs(s) else s
                     direction = "positive" if strongest > 0 else "negative"
                     line = f"Strong {direction} correlation between '{a}' and '{b}' (Pearson {p:.2f}, Spearman {s:.2f})."
                     if abs(p - s) >= CORR_DISAGREEMENT:
                         line += " Outliers distort Pearson here; Spearman reflects most rows."
                     lines.append(line)
+                    profile.correlations.append(corr)
 
     # how each category concentrates the values of the other categorical columns
     for i, a in enumerate(categorical_cols):
@@ -146,6 +214,7 @@ def cross_insights(df: pd.DataFrame, numeric_cols: list[str], categorical_cols: 
                     f"Among '{a}' = '{row}', '{b}' = '{col}' is {pct(share.loc[row, col], 1)} "
                     f"vs {pct(overall[col], 1)} overall ({table.loc[row, col]} records)."
                 )
+                profile.concentrations.append(Concentration(a, str(row), b, str(col), float(value)))
 
     # numeric means that vary a lot across categories
     for cat in categorical_cols:
@@ -156,7 +225,53 @@ def cross_insights(df: pd.DataFrame, numeric_cols: list[str], categorical_cols: 
                 groups = ", ".join(f"'{group}' {mean:.2f}" for group, mean in means.head(MAX_GROUPS).items())
                 more = f" (+{len(means) - MAX_GROUPS} more groups)" if len(means) > MAX_GROUPS else ""
                 lines.append(f"Average '{num}' varies by '{cat}': {groups}{more}.")
-    return lines
+                profile.group_means.append(GroupMeans(num, cat, float(means.max() / means.min())))
+
+
+def profile_dataset(df: pd.DataFrame) -> Profile:
+    rows = len(df)
+    profile = Profile(rows=rows)
+    profile.overview.append(f"The dataset has {rows} rows and {df.shape[1]} columns.")
+
+    duplicates = df.duplicated().sum()
+    if duplicates > 0:
+        profile.overview.append(f"There are {duplicates} fully duplicated rows ({pct(duplicates, rows)}).")
+
+    missing = df.isnull().sum()
+    missing = missing[missing > 0].sort_values(ascending=False)
+    if missing.empty:
+        profile.overview.append("There are no missing values.")
+    else:
+        details = ", ".join(f"'{col}' {pct(count, rows)}" for col, count in missing.items())
+        profile.overview.append(f"Missing values by column: {details}.")
+
+    for name in df.columns:
+        series = df[name]
+        if series.isna().all():
+            profile.kinds[name] = "empty"
+            profile.columns.append(f"'{name}' is completely empty.")
+        elif pd.api.types.is_integer_dtype(series) and looks_like_id(series):
+            profile.kinds[name] = "id"
+            profile.columns.extend(text_insights(name, series))
+        elif pd.api.types.is_numeric_dtype(series):
+            profile.kinds[name] = "numeric"
+            profile.columns.extend(numeric_insights(name, series))
+            if is_irregular(series):
+                profile.irregular.append(name)
+        elif (dates := parse_dates(series)) is not None:
+            profile.kinds[name] = "date"
+            profile.columns.extend(date_insights(name, dates))
+        elif series.nunique() <= MAX_CATEGORIES and series.nunique() < rows:
+            profile.kinds[name] = "categorical"
+            profile.columns.extend(categorical_insights(name, series))
+        else:
+            profile.kinds[name] = "id" if looks_like_id(series) else "text"
+            profile.columns.extend(text_insights(name, series))
+
+    cross_insights(df, profile)
+    if profile.relationships and rows < SMALL_SAMPLE:
+        profile.relationships.append(f"Only {rows} rows: these relationships are indicative, not statistically reliable.")
+    return profile
 
 
 def generate_insights_tool() -> str:
@@ -168,51 +283,9 @@ def generate_insights_tool() -> str:
     """
     try:
         df = dataframe_service.get_df()
-        rows = len(df)
-        if rows == 0:
+        if len(df) == 0:
             return "The dataset is empty."
-
-        overview = [f"The dataset has {rows} rows and {df.shape[1]} columns."]
-
-        duplicates = df.duplicated().sum()
-        if duplicates > 0:
-            overview.append(f"There are {duplicates} fully duplicated rows ({pct(duplicates, rows)}).")
-
-        missing = df.isnull().sum()
-        missing = missing[missing > 0].sort_values(ascending=False)
-        if missing.empty:
-            overview.append("There are no missing values.")
-        else:
-            details = ", ".join(f"'{col}' {pct(count, rows)}" for col, count in missing.items())
-            overview.append(f"Missing values by column: {details}.")
-
-        columns, numeric_cols, categorical_cols = [], [], []
-        for name in df.columns:
-            series = df[name]
-            if series.isna().all():
-                columns.append(f"'{name}' is completely empty.")
-            elif pd.api.types.is_integer_dtype(series) and looks_like_id(series):
-                columns.extend(text_insights(name, series))
-            elif pd.api.types.is_numeric_dtype(series):
-                numeric_cols.append(name)
-                columns.extend(numeric_insights(name, series))
-            elif (dates := parse_dates(series)) is not None:
-                columns.extend(date_insights(name, dates))
-            elif series.nunique() <= MAX_CATEGORIES and series.nunique() < rows:
-                categorical_cols.append(name)
-                columns.extend(categorical_insights(name, series))
-            else:
-                columns.extend(text_insights(name, series))
-
-        cross = cross_insights(df, numeric_cols, categorical_cols)
-        if cross and rows < SMALL_SAMPLE:
-            cross.append(f"Only {rows} rows: these relationships are indicative, not statistically reliable.")
-
-        sections = [("Overview", overview), ("Columns", columns), ("Relationships", cross)]
-        return "\n\n".join(
-            f"## {title}\n" + "\n".join(f"- {line}" for line in lines)
-            for title, lines in sections if lines
-        )
+        return profile_dataset(df).text()
 
     except Exception as e:
         return f"Error generating insights: {str(e)}"

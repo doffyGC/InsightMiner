@@ -3,6 +3,7 @@ import subprocess
 import sys
 
 from app.agents.data_agent import create_data_agent
+from app.tools.generate_report import generate_report_tool
 from app.tools.load_dataset import load_dataset_tool
 
 HELP = """
@@ -14,24 +15,38 @@ Talk to the agent in natural language, for example:
 
 Commands:
   /load <path>   load a CSV file
+  /report [pt]   generate an HTML report of the dataset (English, or Portuguese with pt)
   /new           start a new conversation (keeps the loaded dataset)
   /help          show this message
   /exit          quit
 """
 
 
+# tools whose result starts with the path of a file to open, and how to announce it
+OPENABLE = {
+    "create_chart_tool": ("Chart saved to ", "📈 Chart"),
+    "generate_report_tool": ("Report saved to ", "📄 Report"),
+}
+
+
+def open_file(path: str):
+    if sys.platform == "win32":
+        os.startfile(path)
+    else:
+        subprocess.run(["open" if sys.platform == "darwin" else "xdg-open", path], check=False)
+
+
 def open_charts(response):
-    """Open every chart the agent saved while answering."""
-    prefix = "Chart saved to "
+    """Open every chart or report the agent saved while answering."""
     for tool in response.tools or []:
+        if tool.tool_name not in OPENABLE:
+            continue
+        prefix, announce = OPENABLE[tool.tool_name]
         result = str(tool.result or "")
-        if tool.tool_name == "create_chart_tool" and result.startswith(prefix):
+        if result.startswith(prefix):
             path = result.splitlines()[0].removeprefix(prefix)
-            print(f"📈 Chart: {path}")
-            if sys.platform == "win32":
-                os.startfile(path)
-            else:
-                subprocess.run(["open" if sys.platform == "darwin" else "xdg-open", path], check=False)
+            print(f"{announce}: {path}")
+            open_file(path)
 
 
 def show(response):
@@ -65,6 +80,16 @@ class ChatSession:
                     print("Usage: /load <path>")
                 else:
                     print(load_dataset_tool(arg))
+            elif command == "/report":
+                language = arg or "en"
+                if language not in ("en", "pt"):
+                    print("Usage: /report [pt]")
+                else:
+                    print("⏳ Building the report...")
+                    result = generate_report_tool(language)
+                    print(result)
+                    if result.startswith("Report saved to "):
+                        open_file(result.splitlines()[0].removeprefix("Report saved to "))
             else:
                 print(f"Unknown command {command}. Type /help to see the commands.")
             return True

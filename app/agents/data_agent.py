@@ -9,6 +9,7 @@ from app.tools.describe_data import describe_data_tool
 from app.tools.generate_insights import generate_insights_tool
 from app.tools.query_data import query_data_tool
 from app.tools.create_chart import create_chart_tool
+from app.tools.generate_report import generate_report_tool
 
 # previous exchanges kept in the context, so follow-ups like "and in the South?" work
 HISTORY_RUNS = 6
@@ -42,6 +43,14 @@ the dataset's column names. Use "bar" to compare categories, "line" for change o
 time, "histogram" for the distribution of one numeric column and "scatter" for the
 relationship between two numeric columns. Then tell the user where the chart was
 saved and describe what it shows using the plotted data the tool returns.
+
+When the user asks for a report or a full analysis to share, call generate_report_tool.
+Reports are always in English (language="en"), even when the user writes in Portuguese.
+Use language="pt" only when the user explicitly asks for the report in Portuguese.
+Then tell the user where it was saved and copy the summary bullets the tool returns as
+they are: they were checked against the data, so don't rewrite or add to them.
+
+Don't add currency symbols or units to numbers: the data doesn't say what they are.
 """
 
 
@@ -77,7 +86,8 @@ def create_data_agent():
             describe_data_tool,
             generate_insights_tool,
             query_data_tool,
-            create_chart_tool
+            create_chart_tool,
+            generate_report_tool
         ],
         instructions=build_instructions,
         # the conversation lives in memory, like the loaded dataset: both end with the CLI
