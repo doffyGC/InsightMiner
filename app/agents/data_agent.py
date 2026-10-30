@@ -21,5 +21,9 @@ def create_data_agent():
         - Analyze datasets
         - Generate insights
         - Answer user questions clearly
+
+        To answer questions about the data, always use query_data_tool with a pandas
+        expression over `df`. Never guess numbers: base your answer on the tool result.
+        If the tool returns an error, fix the expression and try again.
         """
     )

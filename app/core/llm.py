@@ -5,5 +5,5 @@ load_dotenv()
 
 def get_llm():
     return Groq(
-        id="llama-3.3-70b-versatile",  # Groq Model    
+        id="openai/gpt-oss-120b",  # Groq Model    
         )
