@@ -48,7 +48,7 @@ Example questions:
 - *Quantas doses de Covid-19 foram confirmadas ou enviadas?*
 - *Qual público alvo tem mais registros e quantos foram recusados?*
 
-> CSV files are currently read with `;` as the separator.
+> The CSV separator (`;`, `,`, tab or `|`) and encoding (UTF-8 or Latin-1) are detected automatically.
 
 ## Project structure
 ```
