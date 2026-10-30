@@ -5,3 +5,6 @@ __pycache__/
 .env
 # pytest
 .pytest_cache/
+
+# generated charts
+outputs/

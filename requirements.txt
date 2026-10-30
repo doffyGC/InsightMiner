@@ -1,4 +1,5 @@
 agno==2.5.14
 groq==1.1.2
+matplotlib==3.10.1
 pandas==2.2.3
 python-dotenv==1.1.1

@@ -1,5 +1,5 @@
 # InsightMiner
-An AI-powered data analysis agent that explores datasets, generates insights and answers questions in natural language. Designed to simplify data understanding by combining autonomous agents with interactive analysis.
+An AI-powered data analysis agent that explores datasets, generates insights, creates charts and answers questions in natural language. Designed to simplify data understanding by combining autonomous agents with interactive analysis.
 
 Built with [Agno](https://github.com/agno-agi/agno) and [Groq](https://groq.com) (`openai/gpt-oss-120b`).
 
@@ -12,12 +12,17 @@ The agent has a set of tools over a pandas DataFrame:
 | `describe_data_tool` | Returns `df.describe()` statistics |
 | `generate_insights_tool` | Profiles every column (numeric, date, categorical, identifier) and finds outliers, dominant categories, date peaks and relationships between columns |
 | `query_data_tool` | Runs a pandas expression written by the agent over the **full** dataset |
+| `create_chart_tool` | Saves a bar, line, histogram or scatter chart as PNG in `outputs/` and returns the plotted numbers |
 
 To answer a question, the agent writes a pandas expression such as
 `df[df["Status"] == "CONFIRMADA"].groupby("Tipo de Vacina").size()`, runs it with `query_data_tool`
 and answers based on the result, so numbers come from the data instead of being guessed.
 Insights work the same way: `generate_insights_tool` computes the facts with pandas and the LLM
 only summarizes them, calling `query_data_tool` for anything beyond the profile.
+
+Charts follow the same idea: the agent only picks the chart type, columns and aggregation, and the
+tool draws it with a fixed, colorblind-safe style. The tool also returns the numbers it plotted, so the
+agent describes the chart from data, not from guessing what the image looks like.
 
 ## Setup
 Requires Python 3.13+.
@@ -39,7 +44,8 @@ GROQ_API_KEY=your_key_here
 python -m app.cli
 ```
 
-The CLI menu lets you load a dataset, describe it, generate insights and ask questions. Sample
+The CLI menu lets you load a dataset, describe it, generate insights, ask questions and create
+charts. Charts are saved in `outputs/` and opened automatically. Sample
 datasets are available in `data/`:
 - `relatorio-notificacoes.csv`: vaccination notifications (categorical and date columns)
 - `vendas.csv`: synthetic sales data (numeric columns, missing values, outliers and duplicated rows)
@@ -47,6 +53,11 @@ datasets are available in `data/`:
 Example questions:
 - *Quantas doses de Covid-19 foram confirmadas ou enviadas?*
 - *Qual público alvo tem mais registros e quantos foram recusados?*
+
+Example chart requests (with `vendas.csv`):
+- *Mostra a receita total por região*
+- *Como a receita evoluiu ao longo do ano em cada região?*
+- *Existe relação entre quantidade e receita?*
 
 > The CSV separator (`;`, `,`, tab or `|`) and encoding (UTF-8 or Latin-1) are detected automatically.
 
@@ -68,6 +79,7 @@ app/
 ├── services/   # DataFrame state
 └── tools/      # Tools available to the agent
 data/           # Sample datasets
+outputs/        # Generated charts (not versioned)
 tests/          # pytest suite
 ```
 
