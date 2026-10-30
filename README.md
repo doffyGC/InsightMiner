@@ -10,12 +10,14 @@ The agent has a set of tools over a pandas DataFrame:
 |---|---|
 | `load_dataset_tool` | Loads a CSV and returns its shape, columns and types |
 | `describe_data_tool` | Returns `df.describe()` statistics |
-| `generate_insights_tool` | Returns basic insights (size, means, missing values) |
+| `generate_insights_tool` | Profiles every column (numeric, date, categorical, identifier) and finds outliers, dominant categories, date peaks and relationships between columns |
 | `query_data_tool` | Runs a pandas expression written by the agent over the **full** dataset |
 
 To answer a question, the agent writes a pandas expression such as
 `df[df["Status"] == "CONFIRMADA"].groupby("Tipo de Vacina").size()`, runs it with `query_data_tool`
 and answers based on the result, so numbers come from the data instead of being guessed.
+Insights work the same way: `generate_insights_tool` computes the facts with pandas and the LLM
+only summarizes them, calling `query_data_tool` for anything beyond the profile.
 
 ## Setup
 Requires Python 3.13+.
@@ -37,8 +39,10 @@ GROQ_API_KEY=your_key_here
 python -m app.cli
 ```
 
-The CLI menu lets you load a dataset, describe it, generate insights and ask questions. A sample
-dataset is available at `data/relatorio-notificacoes.csv`.
+The CLI menu lets you load a dataset, describe it, generate insights and ask questions. Sample
+datasets are available in `data/`:
+- `relatorio-notificacoes.csv`: vaccination notifications (categorical and date columns)
+- `vendas.csv`: synthetic sales data (numeric columns, missing values, outliers and duplicated rows)
 
 Example questions:
 - *Quantas doses de Covid-19 foram confirmadas ou enviadas?*
