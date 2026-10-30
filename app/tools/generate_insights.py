@@ -48,8 +48,11 @@ def numeric_insights(name: str, series: pd.Series) -> list[str]:
     iqr = q3 - q1
     if iqr > 0:
         outliers = s[(s < q1 - 1.5 * iqr) | (s > q3 + 1.5 * iqr)]
-        if len(outliers) > 0:
-            lines.append(f"'{name}' has {len(outliers)} outliers ({pct(len(outliers), len(s))}), e.g. {outliers.head(3).tolist()}.")
+    else:
+        # most values are equal, so the IQR is 0: fall back to distance from the mean
+        outliers = s[(s - s.mean()).abs() > 3 * s.std()] if s.std() > 0 else s.iloc[:0]
+    if len(outliers) > 0:
+        lines.append(f"'{name}' has {len(outliers)} outliers ({pct(len(outliers), len(s))}), e.g. {outliers.head(3).tolist()}.")
 
     if s.nunique() == 1:
         lines.append(f"'{name}' is constant ({s.iloc[0]}) and carries no information.")
@@ -89,7 +92,12 @@ def categorical_insights(name: str, series: pd.Series) -> list[str]:
 
 def looks_like_id(series: pd.Series) -> bool:
     s = series.dropna()
-    return len(s) > 1 and s.nunique() >= ID_UNIQUENESS * len(s)
+    if len(s) <= 1 or s.nunique() < ID_UNIQUENESS * len(s):
+        return False
+    if pd.api.types.is_integer_dtype(s):
+        # numeric ids are dense sequences (0..299); distinct integer metrics are spread out
+        return s.nunique() >= ID_UNIQUENESS * (s.max() - s.min() + 1)
+    return True
 
 
 def text_insights(name: str, series: pd.Series) -> list[str]:

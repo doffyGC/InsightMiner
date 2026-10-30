@@ -50,6 +50,15 @@ Example questions:
 
 > The CSV separator (`;`, `,`, tab or `|`) and encoding (UTF-8 or Latin-1) are detected automatically.
 
+## Tests
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+The tests cover CSV loading (separator and encoding detection) and the tools. They don't call the LLM,
+so they run offline and don't need a Groq API key.
+
 ## Project structure
 ```
 app/
@@ -59,6 +68,7 @@ app/
 ├── services/   # DataFrame state
 └── tools/      # Tools available to the agent
 data/           # Sample datasets
+tests/          # pytest suite
 ```
 
 ## Notes

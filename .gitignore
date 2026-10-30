@@ -3,3 +3,5 @@ __pycache__/
 
 # enviroment variables
 .env
+# pytest
+.pytest_cache/
