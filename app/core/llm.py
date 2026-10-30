@@ -1,4 +1,3 @@
-from os import getenv
 from agno.models.groq import Groq
 from dotenv import load_dotenv
 

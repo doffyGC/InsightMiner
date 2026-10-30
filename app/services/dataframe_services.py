@@ -5,7 +5,7 @@ class DataFrameService:
         self.df = None
 
     def load_csv(self, path: str):
-        self.df = pd.read_csv(path)
+        self.df = pd.read_csv(path, sep=';')
         return self.df
 
     def get_df(self):
