@@ -164,3 +164,35 @@ def test_scatter_groups_capped_at_three(charts_dir):
 
     assert labels.nunique() == 3 and OTHER in set(labels)
     saved_path(create_chart_tool(kind="scatter", x="x", y="y", group="g"))
+
+
+def test_filter_keeps_only_matching_rows():
+    load_dataset_tool("data/vendas.csv")
+
+    result = create_chart_tool(kind="bar", x="regiao", y="receita", agg="sum", filter='df["canal"] == "Online"')
+
+    saved_path(result)
+    assert "Norte            307.03" in result
+    assert "Sudeste        78437.72" in result
+
+
+@pytest.mark.parametrize("expression, message", [
+    ('df["canal"]', "must be a boolean condition"),
+    ('df["canal"] == "Drone"', "matches no rows"),
+    ('df["inexistente"] == 1', "Invalid filter"),
+    ("__import__('os')", "Invalid filter"),
+])
+def test_invalid_filters(expression, message):
+    load_dataset_tool("data/vendas.csv")
+
+    result = create_chart_tool(kind="bar", x="regiao", filter=expression)
+
+    assert result.startswith("Error creating chart") and message in result
+
+
+@pytest.mark.parametrize("expression, readable", [
+    ('df["canal"] == "Online"', "canal == Online"),
+    ("(df['regiao'] == 'Sul') & (df['qtd'] > 5)", "(regiao == Sul) & (qtd > 5)"),
+])
+def test_readable_filter(expression, readable):
+    assert create_chart.readable_filter(expression) == readable

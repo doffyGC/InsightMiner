@@ -38,12 +38,18 @@ def detect_separator(path: str, encoding: str) -> str:
 class DataFrameService:
     def __init__(self):
         self.df = None
+        self.path = None
 
     def load_csv(self, path: str):
         encoding = detect_encoding(path)
         sep = detect_separator(path, encoding)
         self.df = pd.read_csv(path, sep=sep, encoding=encoding)
+        self.path = path
         return self.df
+
+    def schema(self) -> str:
+        """Columns of the loaded dataset with their types, one per line."""
+        return "\n".join(f"- {col} ({dtype})" for col, dtype in self.get_df().dtypes.items())
 
     def get_df(self):
         if self.df is None:

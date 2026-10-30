@@ -11,6 +11,17 @@ SAFE_BUILTINS = {
 }
 
 
+class UnsafeExpression(ValueError):
+    pass
+
+
+def evaluate(code: str, df: pd.DataFrame):
+    """Evaluate a pandas expression over `df` with restricted builtins."""
+    if "__" in code or "import" in code:
+        raise UnsafeExpression("expression not allowed.")
+    return eval(code, {"__builtins__": SAFE_BUILTINS, "pd": pd}, {"df": df})
+
+
 def format_result(result) -> str:
     if isinstance(result, (pd.DataFrame, pd.Series)):
         text = result.head(MAX_ROWS).to_string()
@@ -37,12 +48,9 @@ def query_data_tool(code: str) -> str:
         code (str): A pandas expression using `df`.
     """
     try:
-        if "__" in code or "import" in code:
-            return "Error: expression not allowed."
+        return format_result(evaluate(code, dataframe_service.get_df()))
 
-        df = dataframe_service.get_df()
-        result = eval(code, {"__builtins__": SAFE_BUILTINS, "pd": pd}, {"df": df})
-        return format_result(result)
-
+    except UnsafeExpression:
+        return "Error: expression not allowed."
     except Exception as e:
         return f"Error running query: {type(e).__name__}: {str(e)}"

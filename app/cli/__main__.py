@@ -3,15 +3,21 @@ import subprocess
 import sys
 
 from app.agents.data_agent import create_data_agent
+from app.tools.load_dataset import load_dataset_tool
 
-def print_menu():
-    print("\n📊 === Insight Miner AI ===")
-    print("1. Load dataset")
-    print("2. Describe dataset")
-    print("3. Generate insights")
-    print("4. Ask a question")
-    print("5. Create a chart")
-    print("6. Exit")
+HELP = """
+Talk to the agent in natural language, for example:
+  - quais insights você encontra nesse dataset?
+  - qual a receita total por região?
+  - e só no Sul?
+  - faz um gráfico disso
+
+Commands:
+  /load <path>   load a CSV file
+  /new           start a new conversation (keeps the loaded dataset)
+  /help          show this message
+  /exit          quit
+"""
 
 
 def open_charts(response):
@@ -33,53 +39,62 @@ def show(response):
     open_charts(response)
 
 
-def main():
-    agent = create_data_agent()
+class ChatSession:
+    def __init__(self, agent_factory=create_data_agent):
+        self.agent_factory = agent_factory
+        self.agent = agent_factory()
 
-    print("🚀 Insight Miner AI Starting!")
+    def handle(self, line: str) -> bool:
+        """Process one line typed by the user. Returns False when the chat should end."""
+        line = line.strip()
+        if not line:
+            return True
+
+        if line.startswith("/"):
+            command, _, arg = line.partition(" ")
+            arg = arg.strip().strip('"')
+            if command in ("/exit", "/quit"):
+                return False
+            if command == "/help":
+                print(HELP)
+            elif command == "/new":
+                self.agent = self.agent_factory()
+                print("🧹 New conversation started.")
+            elif command == "/load":
+                if not arg:
+                    print("Usage: /load <path>")
+                else:
+                    print(load_dataset_tool(arg))
+            else:
+                print(f"Unknown command {command}. Type /help to see the commands.")
+            return True
+
+        print("⏳ Thinking...")
+        try:
+            show(self.agent.run(line))
+        except KeyboardInterrupt:
+            print("\nInterrupted.")
+        return True
+
+
+def main():
+    print("🚀 Insight Miner AI")
+    session = ChatSession()
+
+    if len(sys.argv) > 1:
+        print(load_dataset_tool(sys.argv[1]))
+    else:
+        print("Load a dataset with /load <path> or just tell me which file to analyze.")
+    print("Type /help for examples and commands.")
 
     while True:
-        print_menu()
-        choice = input("\nChoose an option: ")
-
-        if choice == "1":
-            path = input("CSV path: ")
-
-            if not path:
-                print("Path cannot be empty.")
-                continue
-
-            response = agent.run(f"""
-                You must call the tool load_dataset_tool.
-                The argument is:
-                path = "{path}"
-            """)
-            show(response)
-
-        elif choice == "2":
-            response = agent.run("Describe the dataset using describe_data_tool")
-            show(response)
-
-        elif choice == "3":
-            response = agent.run("Generate insights about the dataset")
-            show(response)
-
-        elif choice == "4":
-            question = input("Question: ")
-            response = agent.run(f"Answer the following question about the dataset: {question}")
-            show(response)
-
-        elif choice == "5":
-            request = input("What do you want to see? ")
-            response = agent.run(f"Create a chart for this request: {request}")
-            show(response)
-
-        elif choice == "6":
-            print("Finishing...")
+        try:
+            line = input("\n> ")
+        except (EOFError, KeyboardInterrupt):
             break
-
-        else:
-            print("Invalid option. Try again.")
+        if not session.handle(line):
+            break
+    print("Finishing...")
 
 
 if __name__ == "__main__":

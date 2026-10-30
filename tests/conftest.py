@@ -6,9 +6,9 @@ from app.services.dataframe_services import dataframe_service
 @pytest.fixture(autouse=True)
 def reset_dataset():
     # the service is a module-level singleton, so clear it between tests
-    dataframe_service.df = None
+    dataframe_service.df = dataframe_service.path = None
     yield
-    dataframe_service.df = None
+    dataframe_service.df = dataframe_service.path = None
 
 
 @pytest.fixture

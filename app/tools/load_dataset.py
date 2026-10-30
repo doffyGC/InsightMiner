@@ -9,7 +9,6 @@ def load_dataset_tool(path: str) -> str:
     """
     try:
         df = dataframe_service.load_csv(path)
-        columns = "\n".join(f"- {col} ({dtype})" for col, dtype in df.dtypes.items())
-        return f"Dataset loaded! Shape: {df.shape}\nColumns:\n{columns}"
+        return f"Dataset loaded! Shape: {df.shape}\nColumns:\n{dataframe_service.schema()}"
     except Exception as e:
         return f"Error loading dataset: {str(e)}"

@@ -11,6 +11,7 @@ import pandas as pd
 
 from app.services.dataframe_services import dataframe_service
 from app.tools.generate_insights import parse_dates
+from app.tools.query_data import evaluate
 
 OUTPUT_DIR = Path("outputs")
 KINDS = ["bar", "line", "histogram", "scatter"]
@@ -357,6 +358,24 @@ def describe_correlation(frame: pd.DataFrame, x: str, y: str) -> str:
     return text
 
 
+def readable_filter(expression: str) -> str:
+    """df["canal"] == "Online" -> canal == Online"""
+    text = re.sub(r"df\[\s*[\"'](.+?)[\"']\s*\]", r"\1", expression)
+    return re.sub(r"[\"']", "", text)
+
+
+def apply_filter(df: pd.DataFrame, expression: str) -> pd.DataFrame:
+    try:
+        mask = evaluate(expression, df)
+    except Exception as e:
+        raise ChartError(f"Invalid filter {expression!r}: {e}") from e
+    if not isinstance(mask, pd.Series) or mask.dtype != bool or not mask.index.equals(df.index):
+        raise ChartError(f"Filter {expression!r} must be a boolean condition over df, like df[\"col\"] == \"value\".")
+    if not mask.any():
+        raise ChartError(f"Filter {expression!r} matches no rows.")
+    return df[mask]
+
+
 def output_path(kind: str, *columns: str | None) -> Path:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     slug = "-".join(re.sub(r"[^a-z0-9]+", "_", c.lower()).strip("_") for c in columns if c)
@@ -375,6 +394,7 @@ def create_chart_tool(
     group: str | None = None,
     title: str | None = None,
     time_unit: str = "auto",
+    filter: str | None = None,
 ) -> str:
     """
     Create a chart of the loaded dataset, save it as a PNG and return its path plus the plotted numbers.
@@ -393,9 +413,14 @@ def create_chart_tool(
         group (str): Optional categorical column that splits the data into colored series (bar, line, scatter).
         title (str): Optional chart title. Defaults to a description of what is plotted.
         time_unit (str): For line charts over dates: "auto", "day", "week", "month" or "year".
+        filter (str): Optional pandas boolean expression over `df` to keep only some rows,
+            e.g. df["canal"] == "Online" or (df["regiao"] == "Sul") & (df["qtd"] > 5).
+            Use it whenever the chart is about a subset discussed in the conversation.
     """
     try:
         df = dataframe_service.get_df()
+        if filter:
+            df = apply_filter(df, filter)
         if kind not in KINDS:
             raise ChartError(f"Unknown kind '{kind}'. Use one of {KINDS}.")
         if agg not in AGGREGATIONS:
@@ -440,7 +465,10 @@ def create_chart_tool(
                 data = None
                 note = f"Points plotted: {len(frame)}. " + describe_correlation(frame, x, y)
 
-            layout_header(fig, title or subtitle, subtitle if title else None)
+            details = [subtitle] if title else []
+            if filter:
+                details.append(f"Filtered: {readable_filter(filter)} ({len(df)} rows)")
+            layout_header(fig, title or subtitle, " · ".join(details) or None)
 
             path = output_path(kind, x, y, group)
             fig.savefig(path, dpi=DPI, facecolor=SURFACE)
