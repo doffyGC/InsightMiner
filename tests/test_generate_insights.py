@@ -100,8 +100,20 @@ def test_strong_correlation(use_df):
 
     result = insights_for(use_df, df)
 
-    assert "Strong positive correlation between 'x' and 'y' (r = 1.00)." in result
+    assert "Strong positive correlation between 'x' and 'y' (Pearson 1.00, Spearman 1.00)." in result
+    assert "Outliers distort" not in result
     assert "'z'" not in result.split("## Relationships")[-1]
+
+
+def test_correlation_hidden_by_outliers(use_df):
+    x = np.arange(30) * 1.5
+    y = x * 2 + 1
+    y[-3:] = 10_000  # a few huge values drag Pearson down (0.53) but keep the order (Spearman 1.00)
+    result = insights_for(use_df, pd.DataFrame({"x": x, "y": y}))
+
+    line = next(l for l in result.splitlines() if "correlation between 'x' and 'y'" in l)
+    assert line.startswith("- Strong positive correlation")
+    assert "Outliers distort Pearson here; Spearman reflects most rows." in line
 
 
 def test_no_correlation_on_few_rows(use_df):
@@ -150,4 +162,5 @@ def test_sales_sample_finds_planted_patterns():
     assert "'receita' is skewed to the right" in result
     assert "'desconto' is constant (0)" in result
     assert "Among 'regiao' = 'Norte', 'canal' = 'Loja' is 96%" in result
+    assert "Strong positive correlation between 'qtd' and 'receita' (Pearson 0.09, Spearman 0.80). Outliers distort" in result
     assert "Only" not in result

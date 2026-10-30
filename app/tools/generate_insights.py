@@ -5,6 +5,7 @@ from app.services.dataframe_services import dataframe_service
 MAX_CATEGORIES = 20      # above this a text column is treated as free text / identifier
 MIN_ROWS_FOR_CORR = 10   # correlations on fewer rows are mostly noise
 STRONG_CORR = 0.7
+CORR_DISAGREEMENT = 0.3  # Pearson vs Spearman gap that signals outliers distorting Pearson
 SMALL_SAMPLE = 30      # below this, relationships are only indicative
 MAX_GROUPS = 8         # groups listed when comparing a numeric column across categories
 ID_UNIQUENESS = 0.95  # share of distinct values that makes a column look like an identifier
@@ -112,15 +113,21 @@ def text_insights(name: str, series: pd.Series) -> list[str]:
 def cross_insights(df: pd.DataFrame, numeric_cols: list[str], categorical_cols: list[str]) -> list[str]:
     lines = []
 
-    # strong correlations between numeric columns
+    # strong correlations between numeric columns; Spearman (rank-based) catches
+    # relationships that a few outliers hide from Pearson
     if len(numeric_cols) > 1 and len(df) >= MIN_ROWS_FOR_CORR:
-        corr = df[numeric_cols].corr()
+        pearson = df[numeric_cols].corr()
+        spearman = df[numeric_cols].corr(method="spearman")
         for i, a in enumerate(numeric_cols):
             for b in numeric_cols[i + 1:]:
-                r = corr.loc[a, b]
-                if abs(r) >= STRONG_CORR:
-                    direction = "positive" if r > 0 else "negative"
-                    lines.append(f"Strong {direction} correlation between '{a}' and '{b}' (r = {r:.2f}).")
+                p, s = pearson.loc[a, b], spearman.loc[a, b]
+                strongest = p if abs(p) >= abs(s) else s
+                if abs(strongest) >= STRONG_CORR:
+                    direction = "positive" if strongest > 0 else "negative"
+                    line = f"Strong {direction} correlation between '{a}' and '{b}' (Pearson {p:.2f}, Spearman {s:.2f})."
+                    if abs(p - s) >= CORR_DISAGREEMENT:
+                        line += " Outliers distort Pearson here; Spearman reflects most rows."
+                    lines.append(line)
 
     # how each category concentrates the values of the other categorical columns
     for i, a in enumerate(categorical_cols):
