@@ -9,6 +9,10 @@ def create_data_agent():
     return Agent(
         name="Data Analyst Agent",
         model=get_llm(),
+        # Groq sometimes fails to parse gpt-oss tool calls (400 output_parse_failed);
+        # the model layer won't retry 400s, so retry the whole run instead
+        retries=2,
+        delay_between_retries=1,
         tools=[
             load_dataset_tool,
             describe_data_tool,
